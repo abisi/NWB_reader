@@ -53,6 +53,16 @@ def get_session_metadata(nwb_file):
 
     return session_metadata
 
+def get_video_sampling_rate(nwb_file):
+    """
+    This function extracts the video sampling rate from a NWB file.
+    :param nwb_file:
+    :return:
+    """
+    sess_metadata = get_session_metadata(nwb_file)
+    cam_freq = int(sess_metadata['camera_freq']) # get camera sampling frequency
+    return cam_freq
+
 def get_mouse_relative_weight(nwb_file):
     sess_metadata = get_session_metadata(nwb_file)
     nwb_metadata = get_nwb_file_metadata(nwb_file)
@@ -122,10 +132,18 @@ def get_dlc_data_dict(nwb_file):
 
     # Combine nose and top nose to have the norm
     try:
-        dlc_data_dict['nose_norm_distance'] = np.sqrt(dlc_data_dict['top_nose_distance']**2 + dlc_data_dict['nose_distance']**2)
-        dlc_data_dict['nose_norm_velocity'] = np.sqrt(dlc_data_dict['top_nose_velocity']**2 + dlc_data_dict['nose_velocity']**2)
-        dlc_ts_dict['nose_norm_distance'] = dlc_ts_dict['top_nose_distance']
-        dlc_ts_dict['nose_norm_velocity'] = dlc_ts_dict['top_nose_velocity']
+        if dlc_data_dict['top_nose_distance'].shape == dlc_data_dict['nose_distance'].shape:
+
+            dlc_data_dict['nose_norm_distance'] = np.sqrt(dlc_data_dict['top_nose_distance']**2 + dlc_data_dict['nose_distance']**2)
+            dlc_data_dict['nose_norm_velocity'] = np.sqrt(dlc_data_dict['top_nose_velocity']**2 + dlc_data_dict['nose_velocity']**2)
+            dlc_ts_dict['nose_norm_distance'] = dlc_ts_dict['top_nose_distance']
+            dlc_ts_dict['nose_norm_velocity'] = dlc_ts_dict['top_nose_velocity']
+        else:
+            print(f"Shape mismatch between top_nose and nose distances. Skipping norm computation: {nwb_file}")
+            dlc_data_dict['nose_norm_distance'] = dlc_data_dict['nose_distance']
+            dlc_data_dict['nose_norm_velocity'] = dlc_data_dict['nose_velocity']
+            dlc_ts_dict['nose_norm_distance'] = dlc_ts_dict['nose_distance']
+            dlc_ts_dict['nose_norm_velocity'] = dlc_ts_dict['nose_velocity']
 
     except KeyError as err:
         print(f"KeyError: {err}. {bpart} not found in NWB file (no DLC data). Replacing with NaNs: {nwb_file}")
@@ -135,10 +153,13 @@ def get_dlc_data_dict(nwb_file):
         dlc_ts_dict['nose_norm_velocity'] = np.nan
 
     # Filter and remove outliers of pupil area using the percentiles
-    dlc_data_dict['pupil_area'] = np.clip(dlc_data_dict['pupil_area'], 0, np.percentile(dlc_data_dict['pupil_area'], 99))
+    try:
+        dlc_data_dict['pupil_area'] = np.clip(dlc_data_dict['pupil_area'], 0, np.percentile(dlc_data_dict['pupil_area'], 99))
+    except KeyError as err:
+        print(f"KeyError: {err}. Pupil area not found in NWB file (no DLC data). Replacing with NaNs: {nwb_file}")
+        dlc_data_dict['pupil_area'] = np.nan
+        dlc_ts_dict['pupil_area'] = np.nan
 
-    # Re-compute jaw opening times
-    # ...
 
     # Format as a directory for each fields there is data and timestamp as key
     dlc_data = {}
@@ -189,7 +210,10 @@ def get_trial_table(nwb_file):
     :return:
     """
     io = NWBHDF5IO(nwb_file, 'r')
-    nwb_data = io.read()
+    try:
+        nwb_data = io.read()
+    except TypeError as err:
+        print(nwb_file, err)
     nwb_objects = nwb_data.objects
     objects_list = [data for key, data in nwb_objects.items()]
     data_to_take = None
@@ -298,9 +322,13 @@ def get_unit_table(nwb_file):
     nwb_data = io.read()
     try:
         unit_table = nwb_data.units.to_dataframe()
+        # Create a mouse-specific neuronal id for each cluster_id
+        unit_table['neuron_id'] = unit_table.index
         return unit_table
     except AttributeError as e:
-        print(f"Unit table not found in {nwb_file}")
+        beh, day = get_bhv_type_and_training_day_index(nwb_file)
+        if beh=='whisker' and day==0:
+            print(f"Unit table in day 0 not found in {nwb_file}")
         return None
 
 def get_unit_spike_times(nwb_file):
