@@ -5,6 +5,9 @@ import ast
 import numpy as np
 import h5py
 
+import allen_utils
+import neural_utils
+
 """
 This file define NWB reader functions (inspired from CICADA NWB_wrappers).
 The goal is that a function is used to extract one specific element from a NWB file to pass it to any analysis
@@ -29,6 +32,12 @@ def get_mouse_id(nwb_file):
 
     return mouse_id
 
+def get_experimenter(nwb_file):
+    io = NWBHDF5IO(nwb_file, 'r')
+    nwb_data = io.read()
+    experimenter = nwb_data.experimenter[0]
+
+    return experimenter
 
 def get_session_id(nwb_file):
     io = NWBHDF5IO(nwb_file, 'r')
@@ -64,6 +73,11 @@ def get_video_sampling_rate(nwb_file):
     return cam_freq
 
 def get_mouse_relative_weight(nwb_file):
+    """
+    Get mouse relative weight (session weight / reference weight) in percentage, relative to pre water-restriction weight.
+    :param nwb_file:
+    :return:
+    """
     sess_metadata = get_session_metadata(nwb_file)
     nwb_metadata = get_nwb_file_metadata(nwb_file)
     mouse_session_weight = nwb_metadata.weight
@@ -230,6 +244,8 @@ def get_trial_table(nwb_file):
         else:
             continue
     trial_data_frame = data_to_take.to_dataframe()
+    trial_data_frame['mouse_id'] = get_mouse_id(nwb_file)
+    trial_data_frame['trial_id'] = trial_data_frame.index
     return trial_data_frame
 
 def get_behavioral_events(nwb_file):
@@ -319,12 +335,19 @@ def get_unit_table(nwb_file):
     """
 
     io = NWBHDF5IO(nwb_file, 'r')
-    nwb_data = io.read()
+    nwb_data = io.read(skip_version_check=False)
     try:
         unit_table = nwb_data.units.to_dataframe()
-        # Create a mouse-specific neuronal id for each cluster_id
+        unit_table['firing_rate'] = unit_table['firing_rate'].astype(float)
+
+        # Create a mouse-specific neuronal id for each cluster_id, and process
         unit_table['neuron_id'] = unit_table.index
+        unit_table['mouse_id'] = get_mouse_id(nwb_file)
+        #unit_table = neural_utils.convert_electrode_group_object_to_columns(unit_table)
+        #unit_table = allen_utils.process_allen_labels(unit_table, subdivide_areas=True) # allen requires target region
+
         return unit_table
+
     except AttributeError as e:
         beh, day = get_bhv_type_and_training_day_index(nwb_file)
         if beh=='whisker' and day==0:
@@ -333,7 +356,7 @@ def get_unit_table(nwb_file):
 
 def get_unit_spike_times(nwb_file):
     """
-    This function extracts the unit spike times from a NWB file.
+    This function extracts the spike times from a NWB file.
     :param nwb_file:
     :return:
     """
