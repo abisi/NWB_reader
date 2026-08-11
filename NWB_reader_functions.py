@@ -1,17 +1,28 @@
-import pandas as pd
+#import pandas as pd
 from pynwb import NWBHDF5IO
 from pynwb.base import TimeSeries
 import ast
 import numpy as np
 import h5py
 
-import allen_utils
-import neural_utils
+#import allen_utils
+#import neural_utils
 
 """
 This file define NWB reader functions (inspired from CICADA NWB_wrappers).
 The goal is that a function is used to extract one specific element from a NWB file to pass it to any analysis
 """
+
+def open_nwb_file(path):  # from NWB_reader_functions.read_nwb_file
+    """Open an NWB file and return (io, nwb).
+
+    Important: callers must close `io` (e.g. in a finally block) to avoid leaving
+    HDF5 file handles open across many sessions, which can trigger shutdown-time
+    errors in HDMF/h5py.
+    """
+    io = NWBHDF5IO(path, "r")
+    nwb = io.read()
+    return io, nwb
 
 def read_nwb_file(nwb_file):
     io = NWBHDF5IO(nwb_file, 'r')
@@ -81,6 +92,7 @@ def get_mouse_relative_weight(nwb_file):
     sess_metadata = get_session_metadata(nwb_file)
     nwb_metadata = get_nwb_file_metadata(nwb_file)
     mouse_session_weight = nwb_metadata.weight
+    mouse_session_weight = mouse_session_weight[:-2]
     mouse_reference_weight = sess_metadata['reference_weight']
     if mouse_session_weight == 'na' or mouse_reference_weight == 'na':
         return np.nan
@@ -132,7 +144,7 @@ def get_dlc_data_dict(nwb_file):
             print(f"KeyError: {err}. {bpart} not found in NWB file (no DLC data). Skipping")
             continue
 
-        if 'likelihood' in bpart or bpart in ['whisker_angle', 'whisker_velocity']:
+        if ('likelihood' in bpart) or ('angle' in bpart) or ('velocity' in bpart):
             conversion = 1
         else:
             conversion = nwb_data.processing['behavior']['BehavioralTimeSeries'].time_series[bpart].conversion
@@ -153,7 +165,8 @@ def get_dlc_data_dict(nwb_file):
             dlc_ts_dict['nose_norm_distance'] = dlc_ts_dict['top_nose_distance']
             dlc_ts_dict['nose_norm_velocity'] = dlc_ts_dict['top_nose_velocity']
         else:
-            print(f"Shape mismatch between top_nose and nose distances. Skipping norm computation: {nwb_file}")
+            mismatch_size = (dlc_data_dict['top_nose_distance'].shape, dlc_data_dict['nose_distance'].shape)
+            print(f"Shape mismatch {mismatch_size} between top_nose and nose distances. Skipping norm computation: {nwb_file}", f"top_nose_distance shape: {dlc_data_dict['top_nose_distance'].shape}, nose_distance shape: {dlc_data_dict['nose_distance'].shape}")
             dlc_data_dict['nose_norm_distance'] = dlc_data_dict['nose_distance']
             dlc_data_dict['nose_norm_velocity'] = dlc_data_dict['nose_velocity']
             dlc_ts_dict['nose_norm_distance'] = dlc_ts_dict['nose_distance']
